@@ -1,0 +1,58 @@
+heat_template_version: 2015-10-15
+
+description: |
+ #### Demo for Rackspace Cloud Heat Docker integration
+
+resources:
+
+  dockerInstall:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      config: |
+              #!/bin/bash -x
+              snetIP=$(grep IPADDR /etc/sysconfig/network-scripts/ifcfg-eth1 |awk -FIPADDR= '{print $2}')
+              yum -y install docker-io
+              cp /etc/sysconfig/docker /etc/sysconfig/docker.orig
+              OPTIONS='--selinux-enabled --log-driver=journald --signature-verification=false'
+              cat > /etc/sysconfig/docker << EOF
+              OPTIONS='--selinux-enabled  \
+              --log-driver=journald \
+              --signature-verification=false \
+               -H tcp://$snetIP:2375' \
+              if [ -z "${DOCKER_CERT_PATH}" ]; then \
+              DOCKER_CERT_PATH=/etc/docker \
+              fi
+              EOF
+              systemctl daemon-reload
+              systemctl start docker
+              systemctl enable docker
+              systemctl stop firewalld
+              systemctl mask firewalld
+              docker pull fauria/vsftpd
+
+
+  serverInstance:
+    type: OS::Nova::Server
+    properties:
+      key_name: rackesc
+      image: "CentOS 7 (PVHVM)"
+      flavor: general1-2
+      user_data: { get_resource: dockerInstall }
+
+  dockerCtr:
+    type: DockerInc::Docker::Container
+    depends_on: dockerInstall
+    properties:
+      docker_endpoint:
+        str_replace:
+          template: http://$host:2376
+          params:
+            $host: { get_attr: [serverInstance, networks, private, 0 ]}
+      image: fauria/vsftpd
+      # port_specs:
+      #   - 21
+      # port_bindings:
+      #   { 8021:21 }
+      # volumes: {/srv/data_in_container: /var/tmp/data_on_host }
+      # name: "FTP"
